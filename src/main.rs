@@ -1,105 +1,71 @@
-use std::{thread, time::Duration};
-
-use anyhow::{bail, Result};
-// use esp_idf_svc::hal::peripheral::Peripheral;
-use esp_idf_svc::{
-    eventloop::EspSystemEventLoop,
-    hal::{
-        peripheral::{self},
-        prelude::Peripherals,
-    },
-    wifi::{AuthMethod, BlockingWifi, ClientConfiguration, Configuration, EspWifi},
-};
+use esp_idf_svc::{hal::delay::FreeRtos, sys::nvs_flash_init};
 use log::info;
 
-pub fn wifi(
-    ssid: &str,
-    pass: &str,
-    modem: impl peripheral::Peripheral<P = esp_idf_svc::hal::modem::Modem> + 'static,
-    sysloop: EspSystemEventLoop,
-) -> Result<Box<EspWifi<'static>>> {
-    let mut auth_method = AuthMethod::WPA2Personal;
+mod wifi;
+use wifi::init_wifi_with_defaults;
 
-    if ssid.is_empty() {
-        bail!("Missing WiFi name")
-    }
+use std::net::TcpListener;
+use std::thread::spawn;
+use tungstenite::accept;
 
-    if pass.is_empty() {
-        auth_method = AuthMethod::None;
-        info!("Wifi password is empty");
-    }
-
-    let mut esp_wifi = EspWifi::new(modem, sysloop.clone(), None)?;
-
-    let mut wifi = BlockingWifi::wrap(&mut esp_wifi, sysloop)?;
-
-    wifi.set_configuration(&Configuration::Client(ClientConfiguration::default()))?;
-
-    info!("Starting wifi...");
-
-    wifi.start()?;
-
-    info!("Scanning...");
-
-    let ap_infos = wifi.scan()?;
-
-    let ours = ap_infos.into_iter().find(|a| a.ssid == ssid);
-
-    let channel = if let Some(ours) = ours {
-        info!(
-            "Found configured access point {} on channel {}",
-            ssid, ours.channel
-        );
-        Some(ours.channel)
-    } else {
-        info!(
-            "Configured access point {} not found during scanning, will go with unknown channel",
-            ssid
-        );
-        None
-    };
-
-    wifi.set_configuration(&Configuration::Client(ClientConfiguration {
-        ssid: ssid
-            .try_into()
-            .expect("Could not parse the given SSID into WiFi config"),
-        password: pass
-            .try_into()
-            .expect("Could not parse the given password into WiFi config"),
-        channel,
-        auth_method,
-        ..Default::default()
-    }))?;
-
-    info!("Connecting wifi...");
-
-    wifi.connect()?;
-
-    info!("Waiting for DHCP lease...");
-
-    wifi.wait_netif_up()?;
-
-    let ip_info = wifi.wifi().sta_netif().get_ip_info()?;
-
-    info!("Wifi DHCP info: {:?}", ip_info);
-
-    Ok(Box::new(esp_wifi))
-}
+use esp_idf_sys::esp_pthread_cfg_t;
 
 fn main() {
     esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
-    let peripherals = Peripherals::take().unwrap();
 
-    let sysloop = EspSystemEventLoop::take().unwrap();
-    log::info!("fuck");
+    // let mut pthread_cfg = esp_pthread_cfg_t::default();
+    // // pthread_cfg.thread_stack_size = 8192; // Увеличенный размер стека
+    // pthread_cfg.
 
-    let _ = wifi("SpecialForYou", "GtuuhHI7Gg", peripherals.modem, sysloop);
+    // unsafe {
+    //     esp_idf_sys::esp_pthread_set_cfg(&pthread_cfg);
+    // }
 
-    let mut counter: u32 = 0;
-    loop {
-        println!("hey {} ", counter);
-        thread::sleep(Duration::from_secs(1));
-        counter = counter + 1;
+    unsafe { nvs_flash_init() };
+    let _wifi = init_wifi_with_defaults();
+
+    info!("Programm started");
+
+    let server = TcpListener::bind("192.168.0.27:9001").unwrap();
+    for stream in server.incoming() {
+        let the_client = stream.unwrap();
+        println!("Client: {}", the_client.peer_addr().unwrap());
+        let mut websocket = accept(the_client).unwrap();
+
+        websocket
+            .write(tungstenite::Message::Text("Hello client".to_string()))
+            .unwrap();
+        let _ = websocket.flush();
     }
+
+    // let mut counter: u32 = 0;
+    // loop {
+    //     println!("hey {} ", counter);
+    //     FreeRtos::delay_ms(500);
+    //     counter = counter + 1;
+    // }
+
+    // let server = TcpListener::bind("192.168.0.27:9001").unwrap();
+    // for stream in server.incoming() {
+    //     spawn(move || {
+    //         let the_client = stream.unwrap();
+    //         println!("Client: {}", the_client.local_addr().unwrap());
+    //         let mut websocket = accept(the_client).unwrap();
+
+    //         websocket
+    //             .write_message(tungstenite::Message::Text("Hello client".to_string()))
+    //             .unwrap();
+
+    //         loop {
+    //             if websocket.can_read() {
+    //                 let msg = websocket.read_message().unwrap();
+
+    //                 if msg.is_binary() || msg.is_text() {
+    //                     println!("Message received: {}", msg.clone().into_text().unwrap());
+    //                 }
+    //             }
+    //         }
+    //     });
+    // }
 }
