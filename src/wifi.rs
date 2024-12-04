@@ -1,17 +1,17 @@
 use anyhow::{bail, Result};
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
-    hal::{peripheral, prelude::Peripherals},
+    hal::peripheral,
     wifi::{AuthMethod, BlockingWifi, ClientConfiguration, Configuration, EspWifi},
 };
 use log::info;
 
-pub fn init_wifi_with_defaults() -> Result<Box<EspWifi<'static>>> {
-    info!("Инициализация ОС успешна");
-    let peripherals = Peripherals::take().unwrap();
-    let sysloop = EspSystemEventLoop::take().unwrap();
-    wifi("SpecialForYou", "GtuuhHI7Gg", peripherals.modem, sysloop)
-}
+// pub fn init_wifi_with_defaults() -> Result<Box<EspWifi<'static>>> {
+//     info!("Инициализация ОС успешна");
+//     let peripherals = Peripherals::take().unwrap();
+//     let sysloop = EspSystemEventLoop::take().unwrap();
+//     wifi("Redmi", "12345678", peripherals.modem, sysloop)
+// }
 
 pub fn wifi(
     ssid: &str,
@@ -70,9 +70,20 @@ pub fn wifi(
         ..Default::default()
     }))?;
 
-    info!("Connecting wifi...");
+    let mut is_connected = false;
 
-    wifi.connect()?;
+    while !is_connected {
+        info!("Connecting wifi...");
+
+        let connect_result = wifi.connect();
+        match connect_result {
+            Ok(_) => {
+                info!("Подключение с AP установлено");
+                is_connected = true;
+            }
+            Err(e) => info!("Ошибка подклчения к wifi: {e}"),
+        }
+    }
 
     info!("Waiting for DHCP lease...");
 

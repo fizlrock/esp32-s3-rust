@@ -10,6 +10,9 @@ pub use rgb::RGB8;
 
 pub struct WS2812RMT<'a> {
     tx_rtm_driver: TxRmtDriver<'a>,
+    r: u8,
+    g: u8,
+    b: u8,
 }
 
 impl<'d> WS2812RMT<'d> {
@@ -20,9 +23,31 @@ impl<'d> WS2812RMT<'d> {
     ) -> Result<Self> {
         let config = TransmitConfig::new().clock_divider(2);
         let tx = TxRmtDriver::new(channel, led, &config)?;
-        Ok(Self { tx_rtm_driver: tx })
+        Ok(Self {
+            tx_rtm_driver: tx,
+            r: 0,
+            g: 0,
+            b: 0,
+        })
     }
 
+    pub fn set_red(&mut self, value: u8) {
+        self.r = value;
+        self.update();
+    }
+    pub fn set_green(&mut self, value: u8) {
+        self.g = value;
+        self.update();
+    }
+    pub fn set_blue(&mut self, value: u8) {
+        self.b = value;
+        self.update();
+    }
+
+    pub fn set(&mut self, r: u8, g: u8, b: u8) {
+        let color = rgb::RGB8::new(r, g, b);
+        self.set_pixel(color).unwrap();
+    }
     pub fn set_pixel(&mut self, rgb: RGB8) -> Result<()> {
         let color: u32 = ((rgb.g as u32) << 16) | ((rgb.r as u32) << 8) | rgb.b as u32;
         let ticks_hz = self.tx_rtm_driver.counter_clock()?;
@@ -40,6 +65,10 @@ impl<'d> WS2812RMT<'d> {
         self.tx_rtm_driver.start_blocking(&signal)?;
 
         Ok(())
+    }
+
+    fn update(&mut self) {
+        self.set(self.r, self.g, self.b);
     }
 }
 
