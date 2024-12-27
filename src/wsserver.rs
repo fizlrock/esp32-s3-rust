@@ -1,5 +1,7 @@
 use std::net::TcpStream;
 
+use esp_idf_hal::{delay::FreeRtos, pcnt::PcntEvent};
+use log::info;
 use tungstenite::{accept, handshake::HandshakeRole, Error, HandshakeError, Message, Result};
 
 use crate::init::Devices;
@@ -15,6 +17,8 @@ enum Command {
     SetLedColor { channel: char, value: u8 },
     GetVoltage { channel: u8 },
     GetConterValue,
+    ResetConterValue,
+    GetFreq,
     Error,
 }
 
@@ -40,9 +44,18 @@ fn parse_command(command: &str) -> Command {
             let value = &cmd[1..].to_string().parse::<u8>().unwrap();
             return Command::GetVoltage { channel: *value };
         }
-        "c" => Command::GetConterValue,
+        "c" => {
+            // Обработать команду счетчика
+            let mode = &cmd[1..2].chars().next().unwrap();
+            match mode {
+                'r' => Command::ResetConterValue,
+                'v' => Command::GetConterValue,
+                _ => Command::Error,
+            }
+        }
+        "f" => Command::GetFreq,
         _ => {
-            println!("something else: {command}!");
+            println!("something else: <{command}>!");
             Command::Error
         }
     }
@@ -67,11 +80,10 @@ pub fn handle_client(stream: TcpStream, devs: &mut Devices) -> Result<()> {
                         'b' => devs.led.set_blue(value),
                         _ => {}
                     },
-                    Command::GetVoltage { channel } => {
+                    Command::GetVoltage { channel: _ } => {
                         let lsb = devs.adc_pin.read().unwrap();
-                        const LSB_PRICE: f32 = 3900.0 / 4096.0;
-                        let voltage = (lsb as f32) * LSB_PRICE;
-                        socket.send(Message::Text(format!("ADC value: {:4.0} mv", voltage)))?;
+                        // Афигеть, тут не сырое значение, а уже напряжение в mv
+                        socket.send(Message::Text(format!("ADC value: {:4.0} mv", lsb)))?;
                     }
                     Command::GetConterValue => {
                         let counter_value = devs.pcnt.get_counter_value().unwrap();
@@ -79,7 +91,18 @@ pub fn handle_client(stream: TcpStream, devs: &mut Devices) -> Result<()> {
                         let msg = Message::text(text);
 
                         socket.send(msg)?;
-                    } // _ => execute_command(parsed_command, devs),
+                    }
+                    Command::GetFreq => {
+                        devs.freq_meter.measure_fr();
+                        FreeRtos::delay_ms(1000);
+                        devs.freq_meter.measure_fr();
+                        let fr = devs.freq_meter.get_fr();
+                        let text = format!("freq: {fr} Hz");
+
+                        let msg = Message::text(text);
+                        socket.send(msg)?;
+                    }
+                    Command::ResetConterValue => devs.pcnt.counter_clear().unwrap(),
                 }
             }
             Message::Ping(_) | Message::Pong(_) | Message::Frame(_) | Message::Close(_) => {}
